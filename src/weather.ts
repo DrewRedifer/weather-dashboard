@@ -24,6 +24,7 @@ export type BeachSnapshot = {
 }
 
 export type WeatherSnapshot = {
+  fetchedAt: string
   current: {
     temperature: number
     apparentTemperature: number
@@ -50,6 +51,66 @@ export type WeatherSnapshot = {
     precipitationProbability: number
     weatherCode: number
   }>
+}
+
+type OpenMeteoForecastResponse = {
+  current: {
+    temperature_2m: number
+    apparent_temperature: number
+    weather_code: number
+    wind_speed_10m: number
+    wind_direction_10m: number
+    relative_humidity_2m: number
+    precipitation_probability?: number
+    is_day: number
+    time: string
+  }
+  daily: {
+    time: string[]
+    weather_code: number[]
+    temperature_2m_max: number[]
+    temperature_2m_min: number[]
+    precipitation_probability_max: number[]
+    sunrise: string[]
+    sunset: string[]
+  }
+  hourly: {
+    time: string[]
+    temperature_2m: number[]
+    precipitation_probability: number[]
+    weather_code: number[]
+  }
+}
+
+type GeocodingSearchResult = {
+  name: string
+  admin1?: string
+  country?: string
+  latitude: number
+  longitude: number
+  timezone?: string
+}
+
+type GeocodingResponse = {
+  results?: GeocodingSearchResult[]
+}
+
+type NoaaPrediction = {
+  t: string
+  v: string
+  type: 'H' | 'L'
+}
+
+type NoaaPredictionsResponse = {
+  predictions?: NoaaPrediction[]
+}
+
+type MarineResponse = {
+  hourly?: {
+    sea_surface_temperature?: Array<number | null>
+    wave_height?: Array<number | null>
+    wave_period?: Array<number | null>
+  }
 }
 
 export const savedLocations: WeatherLocation[] = [
@@ -100,7 +161,7 @@ export async function fetchWeather(location: WeatherLocation): Promise<WeatherSn
     throw new Error(`Weather request failed: ${response.status}`)
   }
 
-  const data = await response.json()
+  const data = await response.json() as OpenMeteoForecastResponse
 
   const current = {
     temperature: data.current.temperature_2m,
@@ -124,7 +185,7 @@ export async function fetchWeather(location: WeatherLocation): Promise<WeatherSn
     sunset: data.daily.sunset[index],
   }))
 
-  const currentHour = new Date().getHours()
+  const currentHour = findForecastStartIndex(data.hourly.time, data.current.time)
   const hourly = data.hourly.time
     .map((time: string, index: number) => ({
       time,
@@ -134,7 +195,12 @@ export async function fetchWeather(location: WeatherLocation): Promise<WeatherSn
     }))
     .slice(currentHour, currentHour + 12)
 
-  return { current, daily, hourly }
+  return {
+    fetchedAt: new Date().toISOString(),
+    current,
+    daily,
+    hourly,
+  }
 }
 
 export function weatherCodeToLabel(code: number) {
@@ -185,13 +251,24 @@ export function weatherCodeToIcon(code: number, isDay = 1) {
 }
 
 export function formatHourLabel(value: string) {
-  const date = new Date(value)
-  return date.toLocaleTimeString([], { hour: 'numeric' })
+  const parts = parseApiDateTimeParts(value)
+  if (!parts) {
+    return value
+  }
+
+  return formatHourFromParts(parts.hour)
 }
 
 export function formatDayLabel(value: string) {
-  const date = new Date(`${value}T12:00:00`)
-  return date.toLocaleDateString([], { weekday: 'short' })
+  const parts = parseApiDateTimeParts(`${value}T12:00`)
+  if (!parts) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat([], {
+    weekday: 'short',
+    timeZone: 'UTC',
+  }).format(new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 12, 0, 0)))
 }
 
 export function formatPriorityDayLabel(value: string, index: number) {
@@ -254,9 +331,9 @@ export async function searchLocations(query: string) {
     throw new Error(`Location search failed: ${response.status}`)
   }
 
-  const data = await response.json()
+  const data = await response.json() as GeocodingResponse
 
-  return (data.results ?? []).map((result: any, index: number) => ({
+  return (data.results ?? []).map((result, index) => ({
     id: `search-${index}-${result.latitude}-${result.longitude}`,
     label: result.name,
     subtitle: [result.admin1, result.country].filter(Boolean).join(', '),
@@ -282,8 +359,7 @@ export async function fetchBeachSnapshot(latitude: number, longitude: number) {
     throw new Error(`Beach request failed: ${marineResponse.status}`)
   }
 
-  const marineData = await marineResponse.json()
-  const hour = new Date().getHours()
+  const marineData = await marineResponse.json() as MarineResponse
 
   let tidePoints: Array<{ time: string; value: number; type?: string }> = []
 
@@ -292,8 +368,8 @@ export async function fetchBeachSnapshot(latitude: number, longitude: number) {
   try {
     const hiloResponse = await fetch('https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?product=predictions&application=weather-dashboard&date=today&datum=MLLW&station=8721604&time_zone=lst_ldt&units=english&interval=hilo&format=json')
     if (hiloResponse.ok) {
-      const hiloData = await hiloResponse.json()
-      hiloPoints = (hiloData?.predictions ?? []).map((point: any) => ({
+      const hiloData = await hiloResponse.json() as NoaaPredictionsResponse
+      hiloPoints = (hiloData.predictions ?? []).map((point) => ({
         time: point.t,
         value: Number(point.v),
         type: point.type,
@@ -308,8 +384,8 @@ export async function fetchBeachSnapshot(latitude: number, longitude: number) {
     for (let i = 0; i < hiloPoints.length - 1; i += 1) {
       const start = hiloPoints[i]
       const end = hiloPoints[i + 1]
-      const startTime = new Date(start.time.replace(' ', 'T')).getTime()
-      const endTime = new Date(end.time.replace(' ', 'T')).getTime()
+      const startTime = parseNoaaDateTime(start.time)
+      const endTime = parseNoaaDateTime(end.time)
       const steps = 6
 
       for (let step = 0; step <= steps; step += 1) {
@@ -317,7 +393,7 @@ export async function fetchBeachSnapshot(latitude: number, longitude: number) {
         const eased = (1 - Math.cos(Math.PI * t)) / 2
         const value = start.value + (end.value - start.value) * eased
         const timeMs = startTime + (endTime - startTime) * t
-        const iso = new Date(timeMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+        const iso = formatUtcTimeLabel(timeMs)
         expanded.push({
           time: iso,
           rawTime: new Date(timeMs).toISOString(),
@@ -329,16 +405,20 @@ export async function fetchBeachSnapshot(latitude: number, longitude: number) {
     tidePoints = expanded
   } else {
     tidePoints = hiloPoints.map((point) => ({
-      time: new Date(point.time.replace(' ', 'T')).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-      rawTime: new Date(point.time.replace(' ', 'T')).toISOString(),
+      time: formatUtcTimeLabel(parseNoaaDateTime(point.time)),
+      rawTime: new Date(parseNoaaDateTime(point.time)).toISOString(),
       value: point.value,
       type: point.type,
     }))
   }
 
-  const now = Date.now()
-  const upcomingHigh = hiloPoints.find((point) => point.type === 'H' && new Date(point.time.replace(' ', 'T')).getTime() >= now) ?? null
-  const upcomingLow = hiloPoints.find((point) => point.type === 'L' && new Date(point.time.replace(' ', 'T')).getTime() >= now) ?? null
+  const marineIndex = getCurrentTimeZoneHourIndex(
+    marineData.hourly?.wave_height?.length ?? 0,
+    'America/New_York',
+  )
+  const now = getTimeZoneReferenceValue('America/New_York')
+  const upcomingHigh = hiloPoints.find((point) => point.type === 'H' && parseNoaaDateTime(point.time) >= now) ?? null
+  const upcomingLow = hiloPoints.find((point) => point.type === 'L' && parseNoaaDateTime(point.time) >= now) ?? null
   const fallbackHigh = hiloPoints.find((point) => point.type === 'H') ?? null
   const fallbackLow = hiloPoints.find((point) => point.type === 'L') ?? null
 
@@ -348,22 +428,22 @@ export async function fetchBeachSnapshot(latitude: number, longitude: number) {
   const nextHigh = selectedHigh
     ? {
         ...selectedHigh,
-        time: new Date(selectedHigh.time.replace(' ', 'T')).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-        rawTime: new Date(selectedHigh.time.replace(' ', 'T')).toISOString(),
+        time: formatUtcTimeLabel(parseNoaaDateTime(selectedHigh.time)),
+        rawTime: new Date(parseNoaaDateTime(selectedHigh.time)).toISOString(),
       }
     : null
   const nextLow = selectedLow
     ? {
         ...selectedLow,
-        time: new Date(selectedLow.time.replace(' ', 'T')).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-        rawTime: new Date(selectedLow.time.replace(' ', 'T')).toISOString(),
+        time: formatUtcTimeLabel(parseNoaaDateTime(selectedLow.time)),
+        rawTime: new Date(parseNoaaDateTime(selectedLow.time)).toISOString(),
       }
     : null
 
   return {
-    waterTemperature: marineData?.hourly?.sea_surface_temperature?.[hour] ?? null,
-    waveHeight: marineData?.hourly?.wave_height?.[hour] ?? null,
-    wavePeriod: marineData?.hourly?.wave_period?.[hour] ?? null,
+    waterTemperature: marineData.hourly?.sea_surface_temperature?.[marineIndex] ?? null,
+    waveHeight: marineData.hourly?.wave_height?.[marineIndex] ?? null,
+    wavePeriod: marineData.hourly?.wave_period?.[marineIndex] ?? null,
     tidePoints,
     nextHigh,
     nextLow,
@@ -371,14 +451,18 @@ export async function fetchBeachSnapshot(latitude: number, longitude: number) {
 }
 
 export function formatTimeLabel(value: string) {
-  const date = new Date(value)
-  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  const parts = parseApiDateTimeParts(value)
+  if (!parts) {
+    return value
+  }
+
+  return formatTimeFromParts(parts.hour, parts.minute)
 }
 
 export function getDaylightProgress(nowValue: string, sunriseValue: string, sunsetValue: string) {
-  const now = new Date(nowValue).getTime()
-  const sunrise = new Date(sunriseValue).getTime()
-  const sunset = new Date(sunsetValue).getTime()
+  const now = parseApiDateTime(nowValue)
+  const sunrise = parseApiDateTime(sunriseValue)
+  const sunset = parseApiDateTime(sunsetValue)
 
   if (Number.isNaN(now) || Number.isNaN(sunrise) || Number.isNaN(sunset) || sunset <= sunrise) {
     return 0
@@ -396,9 +480,9 @@ export function getDaylightProgress(nowValue: string, sunriseValue: string, suns
 }
 
 export function getDaylightWindowState(nowValue: string, sunriseValue: string, sunsetValue: string) {
-  const now = new Date(nowValue).getTime()
-  const sunrise = new Date(sunriseValue).getTime()
-  const sunset = new Date(sunsetValue).getTime()
+  const now = parseApiDateTime(nowValue)
+  const sunrise = parseApiDateTime(sunriseValue)
+  const sunset = parseApiDateTime(sunsetValue)
 
   if (Number.isNaN(now) || Number.isNaN(sunrise) || Number.isNaN(sunset)) {
     return 'unknown'
@@ -410,9 +494,9 @@ export function getDaylightWindowState(nowValue: string, sunriseValue: string, s
 }
 
 export function getDaylightStatus(nowValue: string, sunriseValue: string, sunsetValue: string) {
-  const now = new Date(nowValue).getTime()
-  const sunrise = new Date(sunriseValue).getTime()
-  const sunset = new Date(sunsetValue).getTime()
+  const now = parseApiDateTime(nowValue)
+  const sunrise = parseApiDateTime(sunriseValue)
+  const sunset = parseApiDateTime(sunsetValue)
 
   if (Number.isNaN(now) || Number.isNaN(sunrise) || Number.isNaN(sunset)) {
     return 'Daylight status unavailable'
@@ -439,8 +523,8 @@ export function getDaylightStatus(nowValue: string, sunriseValue: string, sunset
 }
 
 export function formatDaylightDuration(sunriseValue: string, sunsetValue: string) {
-  const sunrise = new Date(sunriseValue).getTime()
-  const sunset = new Date(sunsetValue).getTime()
+  const sunrise = parseApiDateTime(sunriseValue)
+  const sunset = parseApiDateTime(sunsetValue)
 
   if (Number.isNaN(sunrise) || Number.isNaN(sunset) || sunset <= sunrise) {
     return '—'
@@ -645,4 +729,141 @@ export function buildRainSummary(hourly: WeatherSnapshot['hourly']) {
   }
 
   return `A shower chance starts building around ${label}.`
+}
+
+export function formatRelativeUpdateTime(value: string, now = Date.now()) {
+  const updatedAt = Date.parse(value)
+
+  if (Number.isNaN(updatedAt)) {
+    return 'Update time unavailable'
+  }
+
+  const diffMinutes = Math.max(0, Math.round((now - updatedAt) / 60000))
+
+  if (diffMinutes === 0) {
+    return 'Updated moments ago'
+  }
+
+  if (diffMinutes === 1) {
+    return 'Updated 1 minute ago'
+  }
+
+  if (diffMinutes < 60) {
+    return `Updated ${diffMinutes} minutes ago`
+  }
+
+  const hours = Math.floor(diffMinutes / 60)
+  const minutes = diffMinutes % 60
+  return minutes === 0 ? `Updated ${hours}h ago` : `Updated ${hours}h ${minutes}m ago`
+}
+
+export function formatFetchedAtLabel(value: string) {
+  const updatedAt = Date.parse(value)
+
+  if (Number.isNaN(updatedAt)) {
+    return 'Update time unavailable'
+  }
+
+  return new Date(updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+function parseApiDateTimeParts(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/)
+
+  if (!match) {
+    return null
+  }
+
+  return {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+    hour: Number(match[4]),
+    minute: Number(match[5]),
+  }
+}
+
+function parseApiDateTime(value: string) {
+  const parts = parseApiDateTimeParts(value)
+
+  if (!parts) {
+    return Number.NaN
+  }
+
+  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, 0, 0)
+}
+
+function parseNoaaDateTime(value: string) {
+  return parseApiDateTime(value.replace(' ', 'T'))
+}
+
+function formatHourFromParts(hour: number) {
+  const normalizedHour = ((hour % 24) + 24) % 24
+  const suffix = normalizedHour >= 12 ? 'PM' : 'AM'
+  const twelveHour = normalizedHour % 12 || 12
+  return `${twelveHour} ${suffix}`
+}
+
+function formatTimeFromParts(hour: number, minute: number) {
+  const normalizedHour = ((hour % 24) + 24) % 24
+  const suffix = normalizedHour >= 12 ? 'PM' : 'AM'
+  const twelveHour = normalizedHour % 12 || 12
+  return `${twelveHour}:${String(minute).padStart(2, '0')} ${suffix}`
+}
+
+function formatUtcTimeLabel(value: number) {
+  const date = new Date(value)
+  return formatTimeFromParts(date.getUTCHours(), date.getUTCMinutes())
+}
+
+function findForecastStartIndex(hourlyTimes: string[], currentTime: string) {
+  const currentValue = parseApiDateTime(currentTime)
+  const currentIndex = hourlyTimes.findIndex((time) => parseApiDateTime(time) >= currentValue)
+  return currentIndex >= 0 ? currentIndex : 0
+}
+
+function getCurrentTimeZoneHourIndex(length: number, timeZone: string) {
+  const parts = getTimeZoneWallClockParts(timeZone)
+  if (!parts || length <= 0) {
+    return -1
+  }
+
+  return Math.min(Math.max(parts.hour, 0), length - 1)
+}
+
+function getTimeZoneReferenceValue(timeZone: string) {
+  const parts = getTimeZoneWallClockParts(timeZone)
+
+  if (!parts) {
+    return Number.NaN
+  }
+
+  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, 0, 0)
+}
+
+function getTimeZoneWallClockParts(timeZone: string) {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+
+  const parts = formatter.formatToParts(new Date())
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value
+
+  const year = Number(get('year'))
+  const month = Number(get('month'))
+  const day = Number(get('day'))
+  const hour = Number(get('hour'))
+  const minute = Number(get('minute'))
+
+  if ([year, month, day, hour, minute].some((value) => Number.isNaN(value))) {
+    return null
+  }
+
+  return { year, month, day, hour, minute }
 }

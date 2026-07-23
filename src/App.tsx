@@ -13,7 +13,9 @@ import {
   fetchRadarFrame,
   fetchWeather,
   formatDaylightDuration,
+  formatFetchedAtLabel,
   formatHourLabel,
+  formatRelativeUpdateTime,
   getDaylightStatus,
   formatPriorityDayLabel,
   formatTimeLabel,
@@ -37,6 +39,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<SavedLocationId>('home')
   const [weather, setWeather] = useState<Record<string, WeatherSnapshot>>({})
   const [currentLocation, setCurrentLocation] = useState<WeatherLocation | null>(null)
+  const [selectedSearchLocation, setSelectedSearchLocation] = useState<WeatherLocation | null>(null)
   const [currentStatus, setCurrentStatus] = useState('Location permission not requested yet.')
   const [searchQuery, setSearchQuery] = useState('32937')
   const [searchResults, setSearchResults] = useState<WeatherLocation[]>([])
@@ -46,6 +49,7 @@ function App() {
   const [beach, setBeach] = useState<BeachSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [radarOpacity, setRadarOpacity] = useState(72)
+  const [clockNow, setClockNow] = useState(() => Date.now())
 
   useEffect(() => {
     let cancelled = false
@@ -133,6 +137,16 @@ function App() {
     )
   }, [activeTab, currentLocation])
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setClockNow(Date.now())
+    }, 60000)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [])
+
   const tabLocations = [
     ...savedLocations,
     { id: 'current', label: 'Current', subtitle: 'Use phone location' },
@@ -152,23 +166,24 @@ function App() {
   }, [activeTab, currentLocation])
 
   const activeWeather = activeTab === 'search' ? null : activeLocation ? weather[activeLocation.id] : null
-  const searchSelection = searchResults[0]
+  const searchSelection = selectedSearchLocation
   const searchWeather = searchSelection ? weather[searchSelection.id] : null
   const displayedLocation = activeTab === 'search' ? searchSelection : activeLocation
   const displayedWeather = activeTab === 'search' ? searchWeather : activeWeather
+  const displayedBeach = displayedLocation?.id === 'home' ? beach : null
   const dailyToday = displayedWeather?.daily[0]
 
   const radarTileUrl = radarFrame
     ? `${radarFrame.host}${radarFrame.path}/256/{z}/{x}/{y}/6/1_1.png`
     : null
 
-  const smartSummary = displayedWeather ? buildSmartSummary(displayedWeather, beach) : ''
-  const heroMood = displayedWeather ? buildHeroMood(displayedWeather, beach) : null
-  const beachHeadline = displayedWeather ? buildBeachHeadline(displayedWeather, beach) : null
+  const smartSummary = displayedWeather ? buildSmartSummary(displayedWeather, displayedBeach) : ''
+  const heroMood = displayedWeather ? buildHeroMood(displayedWeather, displayedBeach) : null
+  const beachHeadline = displayedWeather ? buildBeachHeadline(displayedWeather, displayedBeach) : null
   const bestOutdoorWindow = displayedWeather ? getBestOutdoorWindow(displayedWeather.hourly) : null
-  const tideTrend = beach ? getTideTrendLabel(beach.tidePoints) : ''
-  const currentTidePoint = beach ? getCurrentTidePoint(beach.tidePoints) : null
-  const labeledTidePoints = beach ? getLabeledTidePoints(beach.tidePoints) : []
+  const tideTrend = displayedBeach ? getTideTrendLabel(displayedBeach.tidePoints) : ''
+  const currentTidePoint = displayedBeach ? getCurrentTidePoint(displayedBeach.tidePoints) : null
+  const labeledTidePoints = displayedBeach ? getLabeledTidePoints(displayedBeach.tidePoints) : []
   const daylightProgress = displayedWeather?.daily[0]
     ? getDaylightProgress(displayedWeather.current.time, displayedWeather.daily[0].sunrise, displayedWeather.daily[0].sunset)
     : 0
@@ -183,12 +198,16 @@ function App() {
   const daylightWindowState = displayedWeather?.daily[0]
     ? getDaylightWindowState(displayedWeather.current.time, displayedWeather.daily[0].sunrise, displayedWeather.daily[0].sunset)
     : 'unknown'
+  const freshnessLabel = displayedWeather ? formatRelativeUpdateTime(displayedWeather.fetchedAt, clockNow) : 'Waiting for weather data'
+  const lastUpdatedLabel = displayedWeather ? formatFetchedAtLabel(displayedWeather.fetchedAt) : '—'
 
   async function handleSearchSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
     try {
+      setError(null)
       setSearching(true)
+      setSelectedSearchLocation(null)
       const results = await searchLocations(searchQuery)
       setSearchResults(results)
     } catch (searchError) {
@@ -202,13 +221,12 @@ function App() {
   async function handleSelectSearchResult(location: WeatherLocation) {
     setError(null)
     setActiveTab('search')
-    setSearchResults([location])
+    setSelectedSearchLocation(location)
     setLoading(true)
 
     try {
       const snapshot = await fetchWeather(location)
       setWeather((previous) => ({ ...previous, [location.id]: snapshot }))
-      setCurrentLocation(location)
     } catch (selectionError) {
       setError(selectionError instanceof Error ? selectionError.message : 'Unable to load location weather')
     } finally {
@@ -224,8 +242,8 @@ function App() {
           <h1>Weather</h1>
         </div>
         <div className="topbar-meta">
-          <span>{new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
-          <span className={`freshness-badge ${loading ? 'is-live' : ''}`}>{loading ? 'Refreshing…' : 'Updated just now'}</span>
+          <span>{new Date(clockNow).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+          <span className={`freshness-badge ${loading ? 'is-live' : ''}`}>{loading ? 'Refreshing…' : freshnessLabel}</span>
         </div>
       </header>
 
@@ -251,7 +269,7 @@ function App() {
                 <p className="eyebrow">{displayedLocation.subtitle}</p>
                 <span className="hero-chip">Now</span>
               </div>
-              <p className="hero-updated">Last updated {new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p>
+              <p className="hero-updated">Last updated {lastUpdatedLabel}</p>
               <div className="hero-main hero-main-balanced">
                 <div>
                   <div className="hero-temp">{Math.round(displayedWeather.current.temperature)}°</div>
@@ -422,7 +440,7 @@ function App() {
             </div>
           </section>
 
-          {beach ? (
+          {displayedBeach ? (
             <section className="beach-section card mobile-priority-5">
               <div className="beach-header">
                 <div>
@@ -430,9 +448,9 @@ function App() {
                   <h2>Beach Conditions</h2>
                 </div>
                 <div className="beach-badge beach-badge-premium">
-                  {(beach.waveHeight ?? 0) < 2.5 && displayedWeather.current.windSpeed < 12
+                  {(displayedBeach.waveHeight ?? 0) < 2.5 && displayedWeather.current.windSpeed < 12
                     ? 'Great'
-                    : (beach.waveHeight ?? 0) < 4
+                    : (displayedBeach.waveHeight ?? 0) < 4
                       ? 'Fair'
                       : 'Rough'}
                 </div>
@@ -443,7 +461,7 @@ function App() {
                   <span>{beachHeadline.detail}</span>
                 </div>
               ) : null}
-              {beach.tidePoints && beach.tidePoints.length > 1 ? (
+              {displayedBeach.tidePoints && displayedBeach.tidePoints.length > 1 ? (
                 <div className="tide-graph-card premium-tide-graph-card">
                   <div className="tide-graph-header">
                     <div>
@@ -453,11 +471,11 @@ function App() {
                     <div className="tide-mini-badge">{tideTrend}</div>
                   </div>
                   {(() => {
-                    const values = beach.tidePoints?.map((point) => point.value) ?? []
+                    const values = displayedBeach.tidePoints?.map((point) => point.value) ?? []
                     const min = Math.min(...values)
                     const max = Math.max(...values)
                     const range = Math.max(max - min, 1)
-                    const points = beach.tidePoints.map((point, index, arr) => {
+                    const points = displayedBeach.tidePoints.map((point, index, arr) => {
                       const x = (index / Math.max(arr.length - 1, 1)) * 100
                       const y = 46 - ((point.value - min) / range) * 30
                       return { ...point, x, y }
@@ -516,7 +534,7 @@ function App() {
                     </div>
                   </div>
                 </div>
-              ) : (beach.nextHigh || beach.nextLow) ? (
+              ) : (displayedBeach.nextHigh || displayedBeach.nextLow) ? (
                 <div className="tide-graph-card premium-tide-graph-card tide-fallback-card">
                   <div className="tide-graph-header">
                     <div>
@@ -526,16 +544,16 @@ function App() {
                     <div className="tide-mini-badge">Port Canaveral</div>
                   </div>
                   <div className="tide-fallback-row">
-                    {beach.nextHigh ? (
+                    {displayedBeach.nextHigh ? (
                       <div className="tide-callout-pill tide-fallback-pill">
                         <strong>High tide</strong>
-                        <span>{beach.nextHigh.time}</span>
+                        <span>{displayedBeach.nextHigh.time}</span>
                       </div>
                     ) : null}
-                    {beach.nextLow ? (
+                    {displayedBeach.nextLow ? (
                       <div className="tide-callout-pill tide-fallback-pill">
                         <strong>Low tide</strong>
-                        <span>{beach.nextLow.time}</span>
+                        <span>{displayedBeach.nextLow.time}</span>
                       </div>
                     ) : null}
                   </div>
@@ -544,30 +562,30 @@ function App() {
               <div className="beach-grid beach-grid-compact">
                 <article className="beach-metric">
                   <span>Water</span>
-                  <strong>{beach.waterTemperature !== null ? `${Math.round(beach.waterTemperature)}°F` : '—'}</strong>
+                  <strong>{displayedBeach.waterTemperature !== null ? `${Math.round(displayedBeach.waterTemperature)}°F` : '—'}</strong>
                 </article>
                 <article className="beach-metric">
                   <span>Waves</span>
-                  <strong>{beach.waveHeight !== null ? `${beach.waveHeight.toFixed(1)} ft` : '—'}</strong>
+                  <strong>{displayedBeach.waveHeight !== null ? `${displayedBeach.waveHeight.toFixed(1)} ft` : '—'}</strong>
                 </article>
                 <article className="beach-metric">
                   <span>Wave period</span>
-                  <strong>{beach.wavePeriod !== null ? `${Math.round(beach.wavePeriod)} s` : '—'}</strong>
+                  <strong>{displayedBeach.wavePeriod !== null ? `${Math.round(displayedBeach.wavePeriod)} s` : '—'}</strong>
                 </article>
                 <article className="beach-metric">
                   <span>Wind</span>
                   <strong>{Math.round(displayedWeather.current.windSpeed)} mph</strong>
                 </article>
               </div>
-              {(beach.nextHigh || beach.nextLow) ? (
+              {(displayedBeach.nextHigh || displayedBeach.nextLow) ? (
                 <div className="tide-status-row featured-tide-row">
                   <div className="tide-status-item featured-tide-item">
                     <span>Next High Tide</span>
-                    <strong>{beach.nextHigh ? beach.nextHigh.time : '—'}</strong>
+                    <strong>{displayedBeach.nextHigh ? displayedBeach.nextHigh.time : '—'}</strong>
                   </div>
                   <div className="tide-status-item featured-tide-item">
                     <span>Next Low Tide</span>
-                    <strong>{beach.nextLow ? beach.nextLow.time : '—'}</strong>
+                    <strong>{displayedBeach.nextLow ? displayedBeach.nextLow.time : '—'}</strong>
                   </div>
                 </div>
               ) : null}
