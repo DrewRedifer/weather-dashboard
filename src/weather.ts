@@ -9,11 +9,6 @@ export type WeatherLocation = {
   timezone: string
 }
 
-export type RadarFrame = {
-  host: string
-  path: string
-}
-
 export type BeachSnapshot = {
   waterTemperature: number | null
   waveHeight: number | null
@@ -293,26 +288,6 @@ export function windDirectionLabel(degrees: number) {
   const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
   const index = Math.round(degrees / 45) % 8
   return directions[index]
-}
-
-export async function fetchRadarFrame(): Promise<RadarFrame> {
-  const response = await fetch('https://api.rainviewer.com/public/weather-maps.json')
-
-  if (!response.ok) {
-    throw new Error(`Radar request failed: ${response.status}`)
-  }
-
-  const data = await response.json()
-  const latestFrame = data?.radar?.past?.at(-1)
-
-  if (!latestFrame?.path || !data?.host) {
-    throw new Error('No radar frame available')
-  }
-
-  return {
-    host: data.host,
-    path: latestFrame.path,
-  }
 }
 
 export async function searchLocations(query: string) {

@@ -10,7 +10,6 @@ import {
   getLabeledTidePoints,
   getTideTrendLabel,
   fetchBeachSnapshot,
-  fetchRadarFrame,
   fetchWeather,
   formatDaylightDuration,
   formatFetchedAtLabel,
@@ -28,7 +27,6 @@ import {
   weatherCodeToLabel,
   windDirectionLabel,
   type BeachSnapshot,
-  type RadarFrame,
   type SavedLocationId,
   type WeatherLocation,
   type WeatherSnapshot,
@@ -45,7 +43,6 @@ function App() {
   const [searchResults, setSearchResults] = useState<WeatherLocation[]>([])
   const [searching, setSearching] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [radarFrame, setRadarFrame] = useState<RadarFrame | null>(null)
   const [beach, setBeach] = useState<BeachSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [radarOpacity, setRadarOpacity] = useState(72)
@@ -59,9 +56,8 @@ function App() {
         setLoading(true)
         setError(null)
 
-        const [snapshots, radar, beachSnapshot] = await Promise.all([
+        const [snapshots, beachSnapshot] = await Promise.all([
           Promise.all(savedLocations.map((location) => fetchWeather(location))),
-          fetchRadarFrame(),
           fetchBeachSnapshot(28.1486, -80.5887),
         ])
 
@@ -74,7 +70,6 @@ function App() {
         )
 
         setWeather(nextState)
-        setRadarFrame(radar)
         setBeach(beachSnapshot)
       } catch (loadError) {
         if (!cancelled) {
@@ -172,10 +167,6 @@ function App() {
   const displayedWeather = activeTab === 'search' ? searchWeather : activeWeather
   const displayedBeach = displayedLocation?.id === 'home' ? beach : null
   const dailyToday = displayedWeather?.daily[0]
-
-  const radarTileUrl = radarFrame
-    ? `${radarFrame.host}${radarFrame.path}/256/{z}/{x}/{y}/6/1_1.png`
-    : null
 
   const smartSummary = displayedWeather ? buildSmartSummary(displayedWeather, displayedBeach) : ''
   const heroMood = displayedWeather ? buildHeroMood(displayedWeather, displayedBeach) : null
@@ -355,7 +346,7 @@ function App() {
                 <div>
                   <p className="eyebrow">Radar</p>
                   <h2>Live radar preview</h2>
-                  <p className="radar-help">Regional storm view for fast incoming-weather awareness.</p>
+                  <p className="radar-help">High-resolution NOAA radar with unrestricted local zoom.</p>
                 </div>
                 <div className="radar-actions">
                   <label className="radar-opacity-control">
@@ -374,7 +365,6 @@ function App() {
               <div className="radar-map-shell">
                 <MapView
                   location={displayedLocation}
-                  radarTileUrl={radarTileUrl}
                   radarOpacity={radarOpacity / 100}
                 />
               </div>
