@@ -336,9 +336,9 @@ function App() {
             </article>
 
             <article className="card rain-card">
-              <p className="eyebrow">Next few hours</p>
+              <p className="eyebrow">Next 24 hours</p>
               <h2>Rain Summary</h2>
-              <p>{buildRainSummary(displayedWeather.hourly)}</p>
+              <p>{buildRainSummary(displayedWeather.hourly, displayedWeather.current.weatherCode)}</p>
             </article>
 
             <article className="card radar-card">
@@ -586,7 +586,7 @@ function App() {
             <div className="card-heading">
               <div>
                 <p className="eyebrow">Hourly</p>
-                <h2>Today&apos;s forecast</h2>
+                <h2>Next 24 hours</h2>
               </div>
             </div>
             <div className="sparkline-card forecast-sparkline-card premium-forecast-card">
@@ -609,7 +609,7 @@ function App() {
                       <span>{min}°</span>
                     </div>
                     <div className="forecast-chart-main">
-                      <div className="forecast-band-label">Overnight into early morning</div>
+                      <div className="forecast-band-label">Hourly temperature and rain chance</div>
                       <svg className="temp-sparkline forecast-sparkline-large" viewBox="0 0 100 48" preserveAspectRatio="none" aria-hidden="true">
                         <defs>
                           <linearGradient id="forecastLineGlow" x1="0" y1="0" x2="1" y2="0">
@@ -643,7 +643,7 @@ function App() {
                           className="forecast-rain-area"
                           points={`${displayedWeather.hourly.map((hour, index, arr) => {
                             const x = (index / Math.max(arr.length - 1, 1)) * 100
-                            const y = 46 - (hour.precipitationProbability / 100) * 12
+                            const y = 44 - (hour.precipitationProbability / 100) * 40
                             return `${x},${y}`
                           }).join(' ')} 100,48 0,48`}
                         />
@@ -653,7 +653,7 @@ function App() {
                           strokeWidth="1.6"
                           points={displayedWeather.hourly.map((hour, index, arr) => {
                             const x = (index / Math.max(arr.length - 1, 1)) * 100
-                            const y = 46 - (hour.precipitationProbability / 100) * 12
+                            const y = 44 - (hour.precipitationProbability / 100) * 40
                             return `${x},${y}`
                           }).join(' ')}
                         />

@@ -44,6 +44,7 @@ export type WeatherSnapshot = {
     time: string
     temperature: number
     precipitationProbability: number
+    precipitation: number
     weatherCode: number
   }>
 }
@@ -73,6 +74,7 @@ type OpenMeteoForecastResponse = {
     time: string[]
     temperature_2m: number[]
     precipitation_probability: number[]
+    precipitation: number[]
     weather_code: number[]
   }
 }
@@ -142,7 +144,7 @@ export async function fetchWeather(location: WeatherLocation): Promise<WeatherSn
       'precipitation_probability',
       'is_day',
     ].join(','),
-    hourly: ['temperature_2m', 'precipitation_probability', 'weather_code'].join(','),
+    hourly: ['temperature_2m', 'precipitation_probability', 'precipitation', 'weather_code'].join(','),
     daily: ['weather_code', 'temperature_2m_max', 'temperature_2m_min', 'precipitation_probability_max', 'sunrise', 'sunset'].join(','),
     forecast_days: '7',
     temperature_unit: 'fahrenheit',
@@ -186,9 +188,10 @@ export async function fetchWeather(location: WeatherLocation): Promise<WeatherSn
       time,
       temperature: data.hourly.temperature_2m[index],
       precipitationProbability: data.hourly.precipitation_probability[index],
+      precipitation: data.hourly.precipitation[index],
       weatherCode: data.hourly.weather_code[index],
     }))
-    .slice(currentHour, currentHour + 12)
+    .slice(currentHour, currentHour + 24)
 
   return {
     fetchedAt: new Date().toISOString(),
@@ -690,17 +693,31 @@ export function buildBeachRecommendation(snapshot: WeatherSnapshot, beach?: Beac
   }
 }
 
-export function buildRainSummary(hourly: WeatherSnapshot['hourly']) {
-  const rainyHour = hourly.find((hour) => hour.precipitationProbability >= 40)
+export function buildRainSummary(hourly: WeatherSnapshot['hourly'], currentWeatherCode?: number) {
+  const rainIsOccurring = currentWeatherCode != null && (
+    (currentWeatherCode >= 51 && currentWeatherCode <= 67) ||
+    (currentWeatherCode >= 80 && currentWeatherCode <= 82) ||
+    (currentWeatherCode >= 95 && currentWeatherCode <= 99)
+  )
+  const meaningfulRain = hourly.filter((hour) => hour.precipitation > 0.01)
+  const rainyHour = hourly.find((hour) => hour.precipitationProbability >= 40 || hour.precipitation > 0.01)
+  const expectedTotal = meaningfulRain.reduce((total, hour) => total + hour.precipitation, 0)
+
+  if (rainIsOccurring) {
+    if (rainyHour) {
+      return `Rain is occurring now, with more showers possible around ${formatHourLabel(rainyHour.time)}.`
+    }
+    return 'Rain is occurring now, with showers expected to taper off.'
+  }
 
   if (!rainyHour) {
-    return 'No meaningful rain expected in the next several hours.'
+    return 'No meaningful rain expected in the next 24 hours.'
   }
 
   const label = formatHourLabel(rainyHour.time)
 
-  if (rainyHour.precipitationProbability >= 70) {
-    return `Rain looks likely around ${label}.`
+  if (rainyHour.precipitationProbability >= 70 || expectedTotal >= 0.25) {
+    return `Periods of rain are expected, building around ${label}; roughly ${expectedTotal.toFixed(2)} in is forecast over the next 24 hours.`
   }
 
   return `A shower chance starts building around ${label}.`
