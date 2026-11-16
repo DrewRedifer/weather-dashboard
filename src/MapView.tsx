@@ -48,6 +48,9 @@ const KMLB_COVERAGE = {
   west: -85.654,
 }
 
+// GeoServer supports this WMS vendor parameter even though Leaflet's types do not list it.
+const smoothRadarWmsOptions = { interpolations: 'bilinear' }
+
 function isWithinKmlbCoverage(location: WeatherLocation) {
   return location.latitude >= KMLB_COVERAGE.south
     && location.latitude <= KMLB_COVERAGE.north
@@ -80,6 +83,7 @@ export function MapView({ location, className, fullscreen, radarOpacity = 0.72 }
         layers={useLocalRadar ? 'kmlb_sr_bref' : 'conus_bref_qcd'}
         styles="radar_reflectivity"
         format="image/png"
+        {...smoothRadarWmsOptions}
         transparent
         opacity={radarOpacity}
         attribution="NOAA / National Weather Service"
