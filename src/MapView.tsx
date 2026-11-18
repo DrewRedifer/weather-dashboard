@@ -65,7 +65,7 @@ export function MapView({ location, className, fullscreen, radarOpacity = 0.72 }
     <MapContainer
       center={[location.latitude, location.longitude]}
       zoom={9}
-      minZoom={6}
+      minZoom={4}
       maxZoom={14}
       scrollWheelZoom={true}
       className={className ? `weather-map ${className}` : 'weather-map'}
