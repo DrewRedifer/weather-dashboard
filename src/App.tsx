@@ -495,10 +495,11 @@ function App() {
                             {labeledTidePoints.map((point, labelIndex) => {
                               const renderedPoint = points.find((candidate) => candidate.rawTime === point.rawTime)
                               if (!renderedPoint) return null
+                              const labelX = Math.min(Math.max(renderedPoint.x, 8), 92)
                               return (
                                 <g key={`${point.time}-${point.type}`}>
                                   <circle cx={renderedPoint.x} cy={renderedPoint.y} r="2.3" className={`tide-point-dot ${point.type === 'H' ? 'tide-point-high' : 'tide-point-low'}`} />
-                                  <text x={renderedPoint.x} y={point.type === 'H' ? renderedPoint.y - (labelIndex % 2 === 0 ? 4 : 7) : renderedPoint.y + (labelIndex % 2 === 0 ? 6 : 9)} textAnchor="middle" className="tide-point-label">{point.type === 'H' ? `High ${point.time}` : `Low ${point.time}`}</text>
+                                  <text x={labelX} y={point.type === 'H' ? renderedPoint.y - (labelIndex % 2 === 0 ? 4 : 7) : renderedPoint.y + (labelIndex % 2 === 0 ? 6 : 9)} textAnchor="middle" className="tide-point-label">{point.type === 'H' ? `High ${point.time}` : `Low ${point.time}`}</text>
                                 </g>
                               )
                             })}

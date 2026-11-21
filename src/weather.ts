@@ -538,8 +538,13 @@ export function getTideTrendLabel(tidePoints?: BeachSnapshot['tidePoints']) {
     return 'Tide status unavailable'
   }
 
-  const first = tidePoints[0]
-  const second = tidePoints[1]
+  const current = getCurrentTidePoint(tidePoints)
+  const currentIndex = current ? tidePoints.indexOf(current) : -1
+  const firstIndex = Math.max(currentIndex, 0)
+  const first = tidePoints[firstIndex]
+  const second = tidePoints.slice(firstIndex + 1).find((point) => point.value !== first.value)
+
+  if (!second) return 'Tide holding steady'
   if (second.value > first.value) return 'Rising tide'
   if (second.value < first.value) return 'Falling tide'
   return 'Tide holding steady'
@@ -548,7 +553,10 @@ export function getTideTrendLabel(tidePoints?: BeachSnapshot['tidePoints']) {
 export function getCurrentTidePoint(tidePoints?: BeachSnapshot['tidePoints']) {
   if (!tidePoints?.length) return null
 
-  const now = Date.now()
+  // NOAA's lst_ldt timestamps are represented as UTC-shaped ISO strings so
+  // their Eastern wall-clock values survive serialization without shifting.
+  // Compare them with the same kind of wall-clock reference, not real UTC.
+  const now = getTimeZoneReferenceValue('America/New_York')
   let closest = tidePoints[0]
   let closestDelta = Number.POSITIVE_INFINITY
 
